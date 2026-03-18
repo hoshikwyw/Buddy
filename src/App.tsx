@@ -1,120 +1,162 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
+import { useState, useRef, useEffect } from 'react'
+import ReactMarkdown from 'react-markdown'
+import { Send, Bot } from 'lucide-react'
+import clsx from 'clsx'
+import { geminiModel } from './lib/gemini'
+import type { ChatSession } from '@google/generative-ai'
 import './App.css'
 
+const SYSTEM_PROMPT = `You are Buddy, a friendly and chill AI companion. You're warm, casual, and fun to talk to. Keep responses conversational and relaxed — like chatting with a good friend. Don't be overly formal or verbose.`
+
+interface Message {
+  role: 'user' | 'assistant'
+  content: string
+}
+
 function App() {
-  const [count, setCount] = useState(0)
+  const [messages, setMessages] = useState<Message[]>([])
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(false)
+  const bottomRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const chatRef = useRef<ChatSession | null>(null)
+
+  // Start a Gemini chat session once
+  useEffect(() => {
+    chatRef.current = geminiModel.startChat({
+      systemInstruction: SYSTEM_PROMPT,
+      history: [],
+    })
+  }, [])
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, loading])
+
+  async function sendMessage() {
+    const text = input.trim()
+    if (!text || loading || !chatRef.current) return
+
+    const newMessages: Message[] = [...messages, { role: 'user', content: text }]
+    setMessages(newMessages)
+    setInput('')
+    setLoading(true)
+
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+    }
+
+    try {
+      const result = await chatRef.current.sendMessage(text)
+      const reply = result.response.text()
+      setMessages([...newMessages, { role: 'assistant', content: reply }])
+    } catch (err) {
+      console.error(err)
+      setMessages([
+        ...newMessages,
+        { role: 'assistant', content: 'Oops, something went wrong. Try again!' },
+      ])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      sendMessage()
+    }
+  }
+
+  function handleInput(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    setInput(e.target.value)
+    e.target.style.height = 'auto'
+    e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`
+  }
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
+    <div className="chat-layout">
+      {/* Header */}
+      <header className="chat-header">
+        <div className="chat-header-inner">
+          <div className="buddy-avatar">
+            <Bot size={20} />
+          </div>
+          <div>
+            <p className="buddy-title">Buddy</p>
+            <span className="buddy-status">Always here to chat</span>
+          </div>
         </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+      </header>
 
-      <div className="ticks"></div>
+      {/* Messages */}
+      <main className="chat-messages">
+        {messages.length === 0 && (
+          <div className="chat-empty">
+            <div className="chat-empty-avatar">
+              <Bot size={32} />
+            </div>
+            <p className="chat-empty-title">Hey, I'm Buddy!</p>
+            <p className="chat-empty-sub">Your chill AI companion. What's on your mind?</p>
+          </div>
+        )}
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+        {messages.map((msg, i) => (
+          <div key={i} className={clsx('message', msg.role)}>
+            {msg.role === 'assistant' && (
+              <div className="message-avatar">
+                <Bot size={15} />
+              </div>
+            )}
+            <div className="message-bubble">
+              {msg.role === 'assistant' ? (
+                <ReactMarkdown>{msg.content}</ReactMarkdown>
+              ) : (
+                msg.content
+              )}
+            </div>
+          </div>
+        ))}
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+        {loading && (
+          <div className="message assistant">
+            <div className="message-avatar">
+              <Bot size={15} />
+            </div>
+            <div className="message-bubble typing">
+              <span /><span /><span />
+            </div>
+          </div>
+        )}
+
+        <div ref={bottomRef} />
+      </main>
+
+      {/* Input */}
+      <footer className="chat-footer">
+        <div className="chat-input-wrap">
+          <textarea
+            ref={textareaRef}
+            className="chat-input"
+            placeholder="Say something..."
+            value={input}
+            onChange={handleInput}
+            onKeyDown={handleKeyDown}
+            rows={1}
+            disabled={loading}
+          />
+          <button
+            className="send-btn"
+            onClick={sendMessage}
+            disabled={!input.trim() || loading}
+            aria-label="Send"
+          >
+            <Send size={17} />
+          </button>
+        </div>
+        <p className="chat-hint">Enter to send · Shift+Enter for new line</p>
+      </footer>
+    </div>
   )
 }
 
