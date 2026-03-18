@@ -1,79 +1,86 @@
-import { useState, useEffect, useRef } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { useState, useEffect, useMemo } from 'react'
+import { motion, AnimatePresence, type Variants } from 'framer-motion'
 import {
   Search, Bell, Sparkles, MessageCircle,
-  X, ChevronRight, Heart, Plus, Copy, Check, Share2,
+  X, Heart, Plus, Copy, Check, Share2, LogOut,
 } from 'lucide-react'
+
+import { useAuth }      from './hooks/useAuth'
+import { useBuddies, getStatusLabel, type Buddy, type BuddyStatus } from './hooks/useBuddies'
+import { signOutUser }  from './lib/firebase'
+import { SignIn }        from './components/SignIn'
+import { AddBuddyModal } from './components/AddBuddyModal'
 import './App.css'
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── Constants ─────────────────────────────────────────────────────────────────
 
-type Status = 'urgent' | 'cool' | 'active'
-
-interface Contact {
-  id: number
-  name: string
-  initials: string
-  status: Status
-  statusLabel: string
-  avatarBg: string
-}
-
-// ── Data ──────────────────────────────────────────────────────────────────────
-
-const ALL_CONTACTS: Contact[] = [
-  { id: 1, name: 'Aung',  initials: 'AU', status: 'urgent', statusLabel: '🎂 Birthday today!',    avatarBg: '#FFDAB9' },
-  { id: 2, name: 'Su Su', initials: 'SS', status: 'cool',   statusLabel: '⏰ 2 weeks silent',      avatarBg: '#E6E6FA' },
-  { id: 3, name: 'Kyaw',  initials: 'KY', status: 'active', statusLabel: '💬 Active',             avatarBg: '#C8F5E0' },
-  { id: 4, name: 'May',   initials: 'MA', status: 'active', statusLabel: '💬 Active',             avatarBg: '#FFE4E1' },
-  { id: 5, name: 'Thida', initials: 'TH', status: 'cool',   statusLabel: '⏰ 1 week silent',       avatarBg: '#FFF9C4' },
-  { id: 6, name: 'Zaw',   initials: 'ZA', status: 'urgent', statusLabel: '⚡ Needs attention',     avatarBg: '#FFD4B8' },
-]
-
-const DRAFT_MESSAGE =
-  `Hey Aung! 👋 Heard you weren't feeling well — hope you're getting some proper rest! 🌿 Let me know if you need anything at all. Wishing you a speedy recovery! 💙`
-
-const LORE_CHIPS = [
-  "What is Su Su's favorite food?",
-  "When is Aung's birthday?",
-  "What did Kyaw say last week?",
-]
-
-const STATUS_DOT: Record<Status, string> = {
+const STATUS_DOT: Record<BuddyStatus, string> = {
   urgent: '#ef4444',
   cool:   '#f59e0b',
   active: '#22c55e',
 }
 
-const STATUS_RING: Record<Status, string> = {
+const STATUS_RING: Record<BuddyStatus, string> = {
   urgent: 'ring-urgent',
   cool:   'ring-cool',
   active: 'ring-active',
 }
 
-// ── Animation Variants ────────────────────────────────────────────────────────
+const LORE_CHIPS = [
+  "What is their favorite food?",
+  "Who has a birthday coming up?",
+  "Who haven't I talked to in a while?",
+]
 
-const fadeUp = {
-  hidden: { opacity: 0, y: 32 },
+// ── Spark helpers ─────────────────────────────────────────────────────────────
+
+type SparkType = 'birthday' | 'reconnect' | 'attention'
+
+interface Spark {
+  buddy: Buddy
+  type:  SparkType
+}
+
+function buildDraftMessage(buddy: Buddy, type: SparkType): string {
+  if (type === 'birthday')
+    return `Hey ${buddy.name}! 🎂 Wishing you the happiest of birthdays! Hope your day is filled with joy and love. Let's celebrate soon! 🎉`
+  if (type === 'reconnect')
+    return `Hey ${buddy.name}! 👋 It's been a while — you've been on my mind lately. Hope everything is going great your end! Would love to catch up soon? 😊`
+  return `Hey ${buddy.name}! Just checking in to see how you're doing. You mean a lot and I wanted you to know you're thought of! 💙`
+}
+
+function getSparkMessage(spark: Spark): string {
+  const { buddy, type } = spark
+  if (type === 'birthday')
+    return `🎂 Today is ${buddy.name}'s birthday! Should I draft a heartfelt birthday message?`
+  if (type === 'reconnect')
+    return `You haven't talked to ${buddy.name} in a while. Should I draft a quick "thinking of you" message?`
+  return `${buddy.name} might need your attention. Should I help you reach out?`
+}
+
+// ── Animation variants ────────────────────────────────────────────────────────
+
+const fadeUp: Variants = {
+  hidden: { opacity: 0, y: 28 },
   show:   { opacity: 1, y: 0, transition: { type: 'spring', damping: 22, stiffness: 260 } },
 }
 
-const sparkVariant = {
+const sparkVariant: Variants = {
   hidden: { opacity: 0, y: 48, scale: 0.97 },
-  show:   { opacity: 1, y: 0, scale: 1, transition: { type: 'spring', damping: 18, stiffness: 220, delay: 0.15 } },
+  show:   { opacity: 1, y: 0,  scale: 1, transition: { type: 'spring', damping: 18, stiffness: 220, delay: 0.15 } },
 }
 
-const circleContainer = {
+const circleContainer: Variants = {
   hidden: {},
   show:   { transition: { staggerChildren: 0.07, delayChildren: 0.1 } },
 }
 
-const circleItem = {
+const circleItem: Variants = {
   hidden: { opacity: 0, scale: 0.78, y: 12 },
-  show:   { opacity: 1, scale: 1,   y: 0,   transition: { type: 'spring', damping: 16, stiffness: 280 } },
+  show:   { opacity: 1, scale: 1,    y: 0, transition: { type: 'spring', damping: 16, stiffness: 280 } },
 }
 
-const sheetVariant = {
+const sheetVariant: Variants = {
   hidden: { y: '100%' },
   show:   { y: 0,      transition: { type: 'spring', damping: 30, stiffness: 320 } },
   exit:   { y: '100%', transition: { type: 'spring', damping: 30, stiffness: 320 } },
@@ -88,143 +95,181 @@ function getGreeting() {
   return 'Good evening'
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
+// ── Loading screen ────────────────────────────────────────────────────────────
+
+function LoadingScreen() {
+  return (
+    <div className="loading-root">
+      <div className="blob blob-1" /><div className="blob blob-2" /><div className="blob blob-3" />
+      <motion.div
+        className="loading-logo"
+        animate={{ scale: [1, 1.12, 1] }}
+        transition={{ repeat: Infinity, duration: 1.6, ease: 'easeInOut' }}
+      >
+        🤝
+      </motion.div>
+    </div>
+  )
+}
+
+// ── Main App ──────────────────────────────────────────────────────────────────
 
 export default function App() {
-  // Empty-state toggle (demo)
-  const [hasContacts, setHasContacts]     = useState(true)
+  const { user, loading: authLoading } = useAuth()
+  const { buddies, loading: buddiesLoading, addBuddy } = useBuddies(user?.uid ?? null)
 
-  // Spark card
-  const [sparkDismissed, setDismissed]    = useState(false)
+  const [search,         setSearch]        = useState('')
+  const [sparkDismissed, setDismissed]     = useState(false)
+  const [draftOpen,      setDraftOpen]     = useState(false)
+  const [addBuddyOpen,   setAddBuddyOpen]  = useState(false)
+  const [typedMsg,       setTypedMsg]      = useState('')
+  const [draftDone,      setDraftDone]     = useState(false)
+  const [copied,         setCopied]        = useState(false)
 
-  // Draft sheet
-  const [draftOpen, setDraftOpen]         = useState(false)
-  const [typedMsg, setTypedMsg]           = useState('')
-  const [draftDone, setDraftDone]         = useState(false)
-  const [copied, setCopied]               = useState(false)
+  // ── Compute spark from live buddy data ────────────────────────────────────
 
-  // Search
-  const [search, setSearch]               = useState('')
+  const spark = useMemo<Spark | null>(() => {
+    if (!buddies.length) return null
+    const today = new Date()
 
-  const contacts = hasContacts ? ALL_CONTACTS : []
+    const birthdayBuddy = buddies.find(b => {
+      if (!b.birthday) return false
+      const [, mm, dd] = b.birthday.split('-')
+      return parseInt(mm) === today.getMonth() + 1 && parseInt(dd) === today.getDate()
+    })
+    if (birthdayBuddy) return { buddy: birthdayBuddy, type: 'birthday' }
 
-  // ── Typing animation ────────────────────────────────────────────────────────
+    const coolBuddy = buddies.find(b => b.status === 'cool')
+    if (coolBuddy) return { buddy: coolBuddy, type: 'reconnect' }
+
+    const urgentBuddy = buddies.find(b => b.status === 'urgent')
+    if (urgentBuddy) return { buddy: urgentBuddy, type: 'attention' }
+
+    return { buddy: buddies[0], type: 'reconnect' }
+  }, [buddies])
+
+  const draftMessage = spark ? buildDraftMessage(spark.buddy, spark.type) : ''
+
+  // Reset dismissed state when spark changes buddy
+  useEffect(() => { setDismissed(false) }, [spark?.buddy.id])
+
+  // ── Typing animation ──────────────────────────────────────────────────────
+
   useEffect(() => {
-    if (!draftOpen) {
-      setTypedMsg('')
-      setDraftDone(false)
-      return
+    if (!draftOpen || !draftMessage) {
+      setTypedMsg(''); setDraftDone(false); return
     }
 
-    // Small delay before typing starts
-    const startDelay = setTimeout(() => {
+    const delay = setTimeout(() => {
       let i = 0
       const interval = setInterval(() => {
         i++
-        setTypedMsg(DRAFT_MESSAGE.slice(0, i))
-        if (i >= DRAFT_MESSAGE.length) {
-          clearInterval(interval)
-          setDraftDone(true)
-        }
-      }, 28)
+        setTypedMsg(draftMessage.slice(0, i))
+        if (i >= draftMessage.length) { clearInterval(interval); setDraftDone(true) }
+      }, 26)
       return () => clearInterval(interval)
-    }, 600)
+    }, 550)
 
-    return () => clearTimeout(startDelay)
-  }, [draftOpen])
+    return () => clearTimeout(delay)
+  }, [draftOpen, draftMessage])
 
-  // ── Copy to clipboard ───────────────────────────────────────────────────────
+  // ── Clipboard ─────────────────────────────────────────────────────────────
+
   async function handleCopy() {
-    await navigator.clipboard.writeText(DRAFT_MESSAGE)
+    await navigator.clipboard.writeText(draftMessage)
     setCopied(true)
     setTimeout(() => setCopied(false), 2200)
   }
 
-  // ── WhatsApp ────────────────────────────────────────────────────────────────
   function handleWhatsApp() {
-    window.open(`https://wa.me/?text=${encodeURIComponent(DRAFT_MESSAGE)}`, '_blank')
+    window.open(`https://wa.me/?text=${encodeURIComponent(draftMessage)}`, '_blank')
   }
 
-  // ── Render ──────────────────────────────────────────────────────────────────
+  // ── Auth guards ───────────────────────────────────────────────────────────
+
+  if (authLoading)  return <LoadingScreen />
+  if (!user)        return <SignIn />
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  const firstName = user.displayName?.split(' ')[0] ?? 'there'
+
   return (
     <div className="app-root">
-      {/* Ambient blobs */}
       <div className="blob blob-1" />
       <div className="blob blob-2" />
       <div className="blob blob-3" />
 
       <div className="app-container">
 
-        {/* ── Header ──────────────────────────────────────────────────── */}
-        <motion.header
-          className="app-header"
-          variants={fadeUp}
-          initial="hidden"
-          animate="show"
-        >
+        {/* ── Header ────────────────────────────────────────────────── */}
+        <motion.header className="app-header" variants={fadeUp} initial="hidden" animate="show">
           <div>
-            <p className="greeting-eyebrow">✨ {getGreeting()}, Alex</p>
+            <p className="greeting-eyebrow">✨ {getGreeting()}, {firstName}</p>
             <h1 className="greeting-title">Who are we thinking<br />about today?</h1>
           </div>
 
           <div className="header-icons">
-            <motion.button
-              className="icon-pill"
-              whileHover={{ scale: 1.08 }}
-              whileTap={{ scale: 0.94 }}
-              aria-label="Notifications"
-            >
+            <motion.button className="icon-pill" whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.93 }} aria-label="Notifications">
               <Bell size={18} />
             </motion.button>
-            <motion.button
-              className="icon-pill avatar-pill"
-              whileHover={{ scale: 1.08 }}
-              whileTap={{ scale: 0.94 }}
-              aria-label="Profile"
-            >
-              A
-            </motion.button>
+
+            {/* User avatar + sign-out */}
+            <div className="user-menu">
+              {user.photoURL
+                ? <img src={user.photoURL} className="user-photo" alt={user.displayName ?? ''} referrerPolicy="no-referrer" />
+                : <div className="icon-pill avatar-pill">{firstName[0]}</div>
+              }
+              <motion.button
+                className="signout-btn"
+                whileHover={{ scale: 1.06 }}
+                whileTap={{ scale: 0.93 }}
+                onClick={signOutUser}
+                title="Sign out"
+              >
+                <LogOut size={15} />
+              </motion.button>
+            </div>
           </div>
         </motion.header>
 
-        {/* ── Buddy's Circle ──────────────────────────────────────────── */}
-        <motion.section
-          className="section"
-          variants={fadeUp}
-          initial="hidden"
-          animate="show"
-          style={{ transitionDelay: '0.05s' }}
-        >
+        {/* ── Buddy's Circle ─────────────────────────────────────── */}
+        <motion.section className="section" variants={fadeUp} initial="hidden" animate="show">
           <div className="section-row">
             <h2 className="section-title">Buddy's Circle</h2>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              {/* Demo toggle */}
-              <motion.button
-                className="toggle-btn"
-                whileTap={{ scale: 0.93 }}
-                onClick={() => setHasContacts(p => !p)}
-                title="Toggle empty state (demo)"
-              >
-                {hasContacts ? 'Empty state' : 'Show contacts'}
-              </motion.button>
-              <button className="see-all">
-                See all <ChevronRight size={13} />
-              </button>
-            </div>
+            <motion.button
+              className="icon-pill add-pill"
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.93 }}
+              onClick={() => setAddBuddyOpen(true)}
+              aria-label="Add buddy"
+            >
+              <Plus size={16} />
+            </motion.button>
           </div>
 
           <AnimatePresence mode="wait">
-            {contacts.length > 0 ? (
-              /* ── Active State ── */
+            {buddiesLoading ? (
+              /* Skeleton */
+              <motion.div key="skeleton" className="circle-scroll" exit={{ opacity: 0 }}>
+                {[...Array(4)].map((_, i) => (
+                  <div key={i} className="contact-btn">
+                    <div className="skeleton-ring" />
+                    <div className="skeleton-line" style={{ width: 40 }} />
+                  </div>
+                ))}
+              </motion.div>
+            ) : buddies.length > 0 ? (
+              /* Active state */
               <motion.div
                 key="active"
                 className="circle-scroll"
                 variants={circleContainer}
                 initial="hidden"
                 animate="show"
-                exit={{ opacity: 0, transition: { duration: 0.15 } }}
+                exit={{ opacity: 0 }}
               >
-                {contacts.map(c => (
+                {buddies.map(c => (
                   <motion.button
                     key={c.id}
                     className="contact-btn"
@@ -240,23 +285,23 @@ export default function App() {
                       <span className="dot" style={{ background: STATUS_DOT[c.status] }} />
                     </div>
                     <span className="contact-name">{c.name}</span>
-                    <span className="contact-label">{c.statusLabel}</span>
+                    <span className="contact-label">{getStatusLabel(c)}</span>
                   </motion.button>
                 ))}
               </motion.div>
             ) : (
-              /* ── Empty State ── */
+              /* Empty state */
               <motion.div
                 key="empty"
                 className="circle-empty-card"
                 initial={{ opacity: 0, scale: 0.96 }}
                 animate={{ opacity: 1, scale: 1, transition: { type: 'spring', damping: 20 } }}
-                exit={{ opacity: 0, scale: 0.96, transition: { duration: 0.15 } }}
+                exit={{ opacity: 0 }}
               >
                 <motion.div
                   className="circle-empty-emoji"
                   animate={{ rotate: [0, -8, 8, -6, 6, 0] }}
-                  transition={{ delay: 0.4, duration: 0.7 }}
+                  transition={{ delay: 0.4, duration: 0.8 }}
                 >
                   🫂
                 </motion.div>
@@ -268,7 +313,7 @@ export default function App() {
                   className="add-buddy-btn"
                   whileHover={{ scale: 1.05, y: -2 }}
                   whileTap={{ scale: 0.97 }}
-                  onClick={() => setHasContacts(true)}
+                  onClick={() => setAddBuddyOpen(true)}
                 >
                   <Plus size={16} />
                   Add Buddy
@@ -278,14 +323,14 @@ export default function App() {
           </AnimatePresence>
         </motion.section>
 
-        {/* ── Daily Spark ─────────────────────────────────────────────── */}
+        {/* ── Daily Spark ─────────────────────────────────────────── */}
         <section className="section">
           <div className="section-row">
             <h2 className="section-title">Daily Spark</h2>
           </div>
 
           <AnimatePresence mode="wait">
-            {sparkDismissed ? (
+            {!spark || sparkDismissed ? (
               <motion.div
                 key="empty-spark"
                 className="spark-empty"
@@ -294,16 +339,20 @@ export default function App() {
                 exit={{ opacity: 0 }}
               >
                 <Heart size={22} color="#FFDAB9" />
-                <p>You're all caught up! Check back later.</p>
+                <p>
+                  {buddies.length === 0
+                    ? 'Add your first Buddy to see daily sparks!'
+                    : "You're all caught up! Check back later."}
+                </p>
               </motion.div>
             ) : (
               <motion.div
-                key="spark-card"
+                key={`spark-${spark.buddy.id}`}
                 className="spark-card"
                 variants={sparkVariant}
                 initial="hidden"
                 animate="show"
-                exit={{ opacity: 0, scale: 0.95, y: 16, transition: { duration: 0.2 } }}
+                exit={{ opacity: 0, scale: 0.95, y: 16, transition: { duration: 0.18 } }}
                 whileHover={{ y: -3, transition: { type: 'spring', damping: 20 } }}
               >
                 <div className="spark-orb" />
@@ -312,20 +361,22 @@ export default function App() {
                   className="spark-close"
                   whileTap={{ scale: 0.9 }}
                   onClick={() => setDismissed(true)}
-                  aria-label="Dismiss"
                 >
                   <X size={15} />
                 </motion.button>
 
-                <div className="spark-icon">
-                  <Sparkles size={20} />
+                {/* Buddy's avatar in spark */}
+                <div className="spark-buddy-row">
+                  <div className="spark-buddy-avatar" style={{ background: spark.buddy.avatarBg }}>
+                    {spark.buddy.initials}
+                  </div>
+                  <div className="spark-icon">
+                    <Sparkles size={18} />
+                  </div>
                 </div>
 
                 <p className="spark-eyebrow">Buddy says</p>
-                <p className="spark-message">
-                  Your friend <strong>Aung</strong> mentioned he was feeling sick
-                  yesterday. Should I draft a quick "Get well soon" message?
-                </p>
+                <p className="spark-message">{getSparkMessage(spark)}</p>
 
                 <div className="spark-actions">
                   <motion.button
@@ -350,14 +401,8 @@ export default function App() {
           </AnimatePresence>
         </section>
 
-        {/* ── Lore Vault ──────────────────────────────────────────────── */}
-        <motion.section
-          className="section"
-          variants={fadeUp}
-          initial="hidden"
-          animate="show"
-          style={{ transitionDelay: '0.25s' }}
-        >
+        {/* ── Lore Vault ──────────────────────────────────────────── */}
+        <motion.section className="section" variants={fadeUp} initial="hidden" animate="show">
           <div className="section-row">
             <h2 className="section-title">The Lore Vault</h2>
           </div>
@@ -377,7 +422,6 @@ export default function App() {
                 initial={{ opacity: 0, scale: 0.7 }}
                 animate={{ opacity: 1, scale: 1 }}
                 onClick={() => setSearch('')}
-                aria-label="Clear"
               >
                 <X size={15} />
               </motion.button>
@@ -404,11 +448,10 @@ export default function App() {
         <div style={{ height: 40 }} />
       </div>
 
-      {/* ── Draft Message Sheet ──────────────────────────────────────── */}
+      {/* ── Draft Message Sheet ────────────────────────────────────── */}
       <AnimatePresence>
-        {draftOpen && (
+        {draftOpen && spark && (
           <>
-            {/* Backdrop */}
             <motion.div
               className="sheet-backdrop"
               initial={{ opacity: 0 }}
@@ -416,8 +459,6 @@ export default function App() {
               exit={{ opacity: 0 }}
               onClick={() => setDraftOpen(false)}
             />
-
-            {/* Bottom sheet */}
             <motion.div
               className="draft-sheet"
               variants={sheetVariant}
@@ -425,26 +466,25 @@ export default function App() {
               animate="show"
               exit="exit"
             >
-              {/* Drag handle */}
               <div className="sheet-handle" />
 
-              {/* Sheet header */}
               <div className="sheet-header">
                 <div>
                   <p className="sheet-title">Buddy's Draft ✨</p>
-                  <p className="sheet-subtitle">For Aung · Get Well Soon</p>
+                  <p className="sheet-subtitle">
+                    For {spark.buddy.name} ·{' '}
+                    {spark.type === 'birthday' ? 'Birthday' : spark.type === 'reconnect' ? 'Reconnect' : 'Check-in'}
+                  </p>
                 </div>
                 <motion.button
                   className="sheet-close"
                   whileTap={{ scale: 0.9 }}
                   onClick={() => setDraftOpen(false)}
-                  aria-label="Close"
                 >
                   <X size={17} />
                 </motion.button>
               </div>
 
-              {/* Buddy avatar row */}
               <div className="sheet-buddy-row">
                 <div className="sheet-buddy-avatar">
                   <Sparkles size={16} />
@@ -460,7 +500,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Message bubble */}
               <div className="sheet-bubble-wrap">
                 <div className="sheet-bubble">
                   <span>{typedMsg}</span>
@@ -468,12 +507,10 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Hint */}
               <p className="sheet-hint">
                 {draftDone ? '✅ Message ready — copy or send directly!' : 'AI is crafting your message...'}
               </p>
 
-              {/* Action buttons */}
               <AnimatePresence>
                 {draftDone && (
                   <motion.div
@@ -490,7 +527,6 @@ export default function App() {
                       {copied ? <Check size={16} /> : <Copy size={16} />}
                       {copied ? 'Copied!' : 'Copy'}
                     </motion.button>
-
                     <motion.button
                       className="btn-whatsapp"
                       whileHover={{ scale: 1.03 }}
@@ -509,6 +545,13 @@ export default function App() {
           </>
         )}
       </AnimatePresence>
+
+      {/* ── Add Buddy Modal ────────────────────────────────────────── */}
+      <AddBuddyModal
+        open={addBuddyOpen}
+        onClose={() => setAddBuddyOpen(false)}
+        onSave={addBuddy}
+      />
     </div>
   )
 }
